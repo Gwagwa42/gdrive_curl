@@ -1,15 +1,20 @@
 # gdrive_curl.sh Test Suite
 
-Comprehensive test suite for gdrive_curl.sh covering all 28 commands and major functionality.
+Comprehensive test suite for gdrive_curl.sh covering all 29 commands and major functionality, including OAuth scope management.
 
 ## Quick Start
 
 ```bash
-# Run all tests
+# Run all tests (default: app-only mode)
 ./run_tests.sh
+
+# Run tests with different OAuth scopes
+SCOPE_MODE=app ./run_tests.sh    # App-only access (drive.file scope)
+SCOPE_MODE=full ./run_tests.sh   # Full Drive access (drive scope)
 
 # Run specific test suite
 ./run_tests.sh auth
+./run_tests.sh scope
 ./run_tests.sh file
 ./run_tests.sh permissions
 
@@ -23,6 +28,29 @@ Comprehensive test suite for gdrive_curl.sh covering all 28 commands and major f
 ./run_tests.sh -l
 ```
 
+## OAuth Scope Testing
+
+The test suite supports testing with two different OAuth scopes:
+
+- **App-only mode** (`drive.file`): Default mode, only accesses files created by the app
+- **Full access mode** (`drive`): Full Google Drive access for comprehensive testing
+
+### Running Tests with Different Scopes
+
+```bash
+# Using environment variables
+SCOPE_MODE=app make test     # Test with app-only scope
+SCOPE_MODE=full make test    # Test with full Drive scope
+
+# Using Makefile targets
+make test-app               # Run all tests with app-only scope
+make test-full              # Run all tests with full Drive scope
+make test-all               # Run tests with both scopes
+
+# Test specific suite with scope
+SCOPE_MODE=full ./run_tests.sh file
+```
+
 ## Test Coverage
 
 ### Test Suites
@@ -32,8 +60,17 @@ Comprehensive test suite for gdrive_curl.sh covering all 28 commands and major f
    - Authentication status
    - Token file integrity
    - Basic command access
+   - Scope command functionality
 
-2. **File Operations Tests** (`test_file_ops.sh`)
+2. **OAuth Scope Tests** (`test_scope.sh`)
+   - Scope command output
+   - --app-only and --full-access flags
+   - SCOPE_MODE environment variable
+   - Token file separation
+   - Flag vs environment precedence
+   - Default scope mode validation
+
+3. **File Operations Tests** (`test_file_ops.sh`)
    - Upload (small and large files)
    - Download (with and without filename)
    - Update file content
@@ -69,12 +106,25 @@ Comprehensive test suite for gdrive_curl.sh covering all 28 commands and major f
    - Export format validation
    - Storage quota checking
 
+7. **Version History Tests** (`test_revisions.sh`)
+   - List file revisions
+   - Download specific revisions
+   - Verify revision metadata
+   - Handle files without revisions
+
 ## Prerequisites
 
 1. **Authentication Required**
    ```bash
-   # Authenticate first
-   ../gdrive_curl.sh init
+   # Authenticate with app-only scope (default)
+   ../gdrive_curl.sh --app-only init
+
+   # Or authenticate with full Drive access
+   ../gdrive_curl.sh --full-access init
+
+   # Note: Different scopes use different token files
+   # App-only: ~/.config/gdrive-curl/tokens-app.json
+   # Full access: ~/.config/gdrive-curl/tokens-full.json
    ```
 
 2. **Dependencies**

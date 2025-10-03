@@ -5,9 +5,24 @@ set -euo pipefail
 # OAuth credentials must be set via environment variables
 CLIENT_ID="${CLIENT_ID:-}"
 CLIENT_SECRET="${CLIENT_SECRET:-}"
-SCOPE="${SCOPE:-https://www.googleapis.com/auth/drive}" # Use drive.file for app-created files only, or drive for full access
-TOKENS_FILE="${TOKENS_FILE:-$HOME/.config/gdrive-curl/tokens.json}"
-mkdir -p "$(dirname "$TOKENS_FILE")"
+
+# Scope mode configuration: 'app' for drive.file (default) or 'full' for full drive access
+# Can be set via SCOPE_MODE env var or command line flags
+SCOPE_MODE="${SCOPE_MODE:-app}"
+
+# Function to configure scope based on mode
+configure_scope() {
+    if [[ "$SCOPE_MODE" == "full" ]]; then
+        SCOPE="${SCOPE:-https://www.googleapis.com/auth/drive}"
+        TOKENS_FILE="${TOKENS_FILE:-$HOME/.config/gdrive-curl/tokens-full.json}"
+        SCOPE_DESC="Full Google Drive access"
+    else
+        SCOPE="${SCOPE:-https://www.googleapis.com/auth/drive.file}"
+        TOKENS_FILE="${TOKENS_FILE:-$HOME/.config/gdrive-curl/tokens-app.json}"
+        SCOPE_DESC="App-created files only"
+    fi
+    mkdir -p "$(dirname "$TOKENS_FILE")"
+}
 
 # Validate credentials are set (except for usage/help display)
 validate_credentials() {
@@ -757,8 +772,37 @@ get_starred() {
     done
 }
 
+show_scope_info() {
+    echo "Current scope configuration:"
+    echo "  Mode: $SCOPE_MODE"
+    echo "  Description: $SCOPE_DESC"
+    echo "  Scope URL: $SCOPE"
+    echo "  Token file: $TOKENS_FILE"
+    echo ""
+
+    if have_tokens && access_token_fresh; then
+        echo "Status: Authenticated ✓"
+    elif have_tokens; then
+        echo "Status: Token expired (run any command to auto-refresh)"
+    else
+        echo "Status: Not authenticated (run 'init' to authenticate)"
+    fi
+
+    echo ""
+    echo "Usage:"
+    if [[ "$SCOPE_MODE" == "app" ]]; then
+        echo "  Current mode (app-only) can only access files created by this app."
+        echo "  To access all Drive files, use: $0 --full-access <command>"
+    else
+        echo "  Current mode (full access) can access all files in your Drive."
+        echo "  For restricted access, use: $0 --app-only <command>"
+    fi
+}
+
 init_flow() {
     echo "Starting OAuth 2.0 device flow..."
+    echo "Scope: $SCOPE_DESC ($SCOPE_MODE mode)"
+    echo ""
     local dev resp user_code ver_url interval device_code
     dev=$(obtain_device_code)
 
@@ -837,10 +881,15 @@ init_flow() {
 
 usage() {
     cat <<EOF
-Usage: $0 <command> [arguments]
+Usage: $0 [--full-access|--app-only] <command> [arguments]
 
-AUTHENTICATION:
+SCOPE FLAGS (optional, must be first):
+  --full-access                     Use full Drive access (all files)
+  --app-only                        Use restricted access (app-created files only)
+
+AUTHENTICATION & INFO:
   init                              Start OAuth device flow and save tokens
+  scope                             Show current scope configuration and status
 
 FILE UPLOAD:
   upload <file> [name] [parent_id]  Upload file (multipart, <= 5MB recommended)
@@ -917,6 +966,12 @@ EXAMPLES:
   $0 get-starred                    # List starred files
   $0 list-trash                     # View trash contents
   $0 list-revisions abc123          # See file history
+
+SCOPE EXAMPLES:
+  $0 scope                          # Check current scope mode
+  $0 --full-access list             # List all Drive files (full access)
+  $0 --app-only upload file.txt     # Upload with app-only access
+  SCOPE_MODE=full $0 init           # Initialize with full access via env var
 EOF
 }
 
@@ -925,12 +980,24 @@ main() {
     require jq
     require file
 
+    # Parse scope flags if present (must be first argument)
+    if [[ "${1:-}" == "--full-access" ]]; then
+        SCOPE_MODE="full"
+        shift
+    elif [[ "${1:-}" == "--app-only" ]]; then
+        SCOPE_MODE="app"
+        shift
+    fi
+
+    # Configure scope based on mode
+    configure_scope
+
     local cmd="${1:-}"; shift || true
 
-    # Check if command requires authentication (all except help and empty)
+    # Check if command requires authentication (all except help, scope, and empty)
     case "$cmd" in
-        -h|--help|help|"")
-            # Don't validate credentials for help or empty command
+        -h|--help|help|scope|"")
+            # Don't validate credentials for help, scope info, or empty command
             ;;
         *)
             # Validate credentials for all commands that interact with Google Drive
@@ -942,8 +1009,9 @@ main() {
     [[ -z "$cmd" ]] && { usage; exit 1; }
 
     case "$cmd" in
-        # Authentication
+        # Authentication & Info
         init) init_flow ;;
+        scope) show_scope_info ;;
 
         # File Upload
         upload) [[ $# -ge 1 ]] || { usage; exit 1; }; upload_multipart "$@" ;;

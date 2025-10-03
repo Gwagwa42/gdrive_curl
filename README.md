@@ -65,6 +65,50 @@ chmod +x gdrive_curl.sh
 
 ### ⚠️ Important: OAuth Client Required
 
+You **MUST** create your own OAuth credentials. The script no longer includes default credentials for security reasons.
+
+### Understanding OAuth Scopes
+
+The script supports two authorization modes:
+
+#### **App-Only Mode** (`drive.file` scope) - DEFAULT
+- ✅ **More secure** - Only accesses files created by this app
+- ✅ **Easier approval** - No Google verification needed
+- ✅ **Privacy-focused** - Can't see your existing files
+- ❌ **Limited functionality** - Can't list/download existing Drive files
+- 📁 **Use when**: Creating backup tools, log uploaders, app-specific storage
+
+#### **Full Access Mode** (`drive` scope)
+- ✅ **Complete functionality** - Access all Drive files
+- ✅ **Full search** - Find any file in your Drive
+- ✅ **Existing files** - Download, modify, organize all files
+- ⚠️ **Requires trust** - App can see/modify everything
+- 📁 **Use when**: File managers, backup tools for existing files, Drive organizers
+
+### Selecting Scope Mode
+
+```bash
+# Method 1: Command-line flags (per-command)
+./gdrive_curl.sh --full-access list           # List all files
+./gdrive_curl.sh --app-only upload file.txt   # Upload with restricted access
+
+# Method 2: Environment variable (session-wide)
+export SCOPE_MODE=full
+./gdrive_curl.sh list                         # Uses full access
+
+# Method 3: Per-command override
+SCOPE_MODE=full ./gdrive_curl.sh init         # One-time full access
+
+# Check current scope configuration
+./gdrive_curl.sh scope
+```
+
+**Important**: Different scopes use different token files:
+- App-only: `~/.config/gdrive-curl/tokens-app.json`
+- Full access: `~/.config/gdrive-curl/tokens-full.json`
+
+This means you can have both authorizations active and switch between them.
+
 ### Creating OAuth Credentials
 
 1. **Go to [Google Cloud Console](https://console.cloud.google.com/)**
@@ -136,10 +180,11 @@ chmod +x gdrive_curl.sh
 
 ## Commands Reference
 
-### Authentication
+### Authentication & Configuration
 | Command | Description |
 |---------|------------|
 | `init` | Start OAuth device flow and save tokens |
+| `scope` | Show current scope mode and authentication status |
 
 ### File Operations
 | Command | Description |
@@ -296,19 +341,27 @@ project_id=$(./gdrive_curl.sh create-folder "My Project" | jq -r '.id')
 ### Environment Variables
 
 ```bash
-# Custom OAuth credentials
+# OAuth credentials (REQUIRED)
 export CLIENT_ID="your-client-id.apps.googleusercontent.com"
 export CLIENT_SECRET="your-client-secret"
+
+# Scope mode selection (default: app)
+export SCOPE_MODE="full"  # or "app" for restricted access
+
+# Custom scope URL (overrides SCOPE_MODE)
+export SCOPE="https://www.googleapis.com/auth/drive"
 
 # Custom token storage location
 export TOKENS_FILE="$HOME/.gdrive/tokens.json"
 
-# Limit scope to app-created files only
-export SCOPE="https://www.googleapis.com/auth/drive.file"
-
-# Enable debug output
+# Enable debug output for troubleshooting
 export DEBUG=1
 ```
+
+**Token File Locations by Mode**:
+- App-only mode: `~/.config/gdrive-curl/tokens-app.json`
+- Full access mode: `~/.config/gdrive-curl/tokens-full.json`
+- Custom: Set via `TOKENS_FILE` environment variable
 
 ### Shell Integration
 

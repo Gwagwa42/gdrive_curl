@@ -31,6 +31,9 @@ export TEST_FOLDER_NAME="gdrive_curl_test_$(date +%s)"
 export TEST_FILE_PREFIX="test_file_"
 export TEST_CLEANUP=${TEST_CLEANUP:-1}  # Set to 0 to keep test files for debugging
 
+# Scope configuration for tests
+export TEST_SCOPE_MODE="${TEST_SCOPE_MODE:-app}"  # Default to app mode for tests
+
 # Initialize test environment
 init_test_env() {
     mkdir -p "$TEST_LOG_DIR"
@@ -49,9 +52,17 @@ init_test_env() {
         exit 1
     fi
 
-    # Check if authenticated
-    if ! "$GDRIVE_SCRIPT" list >/dev/null 2>&1; then
-        echo -e "${YELLOW}WARNING: Not authenticated. Run '$GDRIVE_SCRIPT init' first${NC}"
+    # Check if authenticated (with correct scope)
+    if [[ "$TEST_SCOPE_MODE" == "full" ]]; then
+        auth_check="$GDRIVE_SCRIPT --full-access list"
+        init_cmd="$GDRIVE_SCRIPT --full-access init"
+    else
+        auth_check="$GDRIVE_SCRIPT --app-only list"
+        init_cmd="$GDRIVE_SCRIPT --app-only init"
+    fi
+
+    if ! $auth_check >/dev/null 2>&1; then
+        echo -e "${YELLOW}WARNING: Not authenticated for $TEST_SCOPE_MODE mode. Run '$init_cmd' first${NC}"
         echo "Some tests will be skipped"
     fi
 }
@@ -183,11 +194,30 @@ fail() {
 
 # Helper functions for gdrive operations
 gdrive() {
-    "$GDRIVE_SCRIPT" "$@" 2>> "$TEST_LOG_FILE"
+    # Add scope flag based on TEST_SCOPE_MODE
+    if [[ "$TEST_SCOPE_MODE" == "full" ]]; then
+        "$GDRIVE_SCRIPT" --full-access "$@" 2>> "$TEST_LOG_FILE"
+    else
+        "$GDRIVE_SCRIPT" --app-only "$@" 2>> "$TEST_LOG_FILE"
+    fi
 }
 
 gdrive_silent() {
-    "$GDRIVE_SCRIPT" "$@" >> "$TEST_LOG_FILE" 2>&1
+    # Add scope flag based on TEST_SCOPE_MODE
+    if [[ "$TEST_SCOPE_MODE" == "full" ]]; then
+        "$GDRIVE_SCRIPT" --full-access "$@" >> "$TEST_LOG_FILE" 2>&1
+    else
+        "$GDRIVE_SCRIPT" --app-only "$@" >> "$TEST_LOG_FILE" 2>&1
+    fi
+}
+
+# Get the token file path based on scope mode
+get_token_file() {
+    if [[ "$TEST_SCOPE_MODE" == "full" ]]; then
+        echo "$HOME/.config/gdrive-curl/tokens-full.json"
+    else
+        echo "$HOME/.config/gdrive-curl/tokens-app.json"
+    fi
 }
 
 get_test_folder_id() {

@@ -12,8 +12,12 @@ help:
 	@echo "gdrive_curl.sh Makefile"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  make test          - Run all tests"
+	@echo "  make test          - Run all tests (app mode)"
+	@echo "  make test-app      - Run all tests with app-only scope"
+	@echo "  make test-full     - Run all tests with full Drive scope"
+	@echo "  make test-all      - Run tests with both scopes"
 	@echo "  make test-auth     - Run authentication tests"
+	@echo "  make test-scope    - Run scope configuration tests"
 	@echo "  make test-file     - Run file operations tests"
 	@echo "  make test-folder   - Run folder operations tests"
 	@echo "  make test-perms    - Run permission tests"
@@ -26,16 +30,34 @@ help:
 	@echo "  make uninstall     - Remove script from $(INSTALL_DIR)"
 	@echo "  make check         - Check syntax with shellcheck"
 	@echo "  make clean         - Clean test logs and data"
-	@echo "  make auth          - Authenticate with Google Drive"
+	@echo "  make auth          - Authenticate with Google Drive (app mode)"
+	@echo "  make auth-full     - Authenticate with full Drive access"
 
 # Test targets
 .PHONY: test
 test:
 	@cd $(TEST_DIR) && ./run_tests.sh
 
+# Scope-specific test targets
+.PHONY: test-app
+test-app:
+	@cd $(TEST_DIR) && SCOPE_MODE=app ./run_tests.sh
+
+.PHONY: test-full
+test-full:
+	@cd $(TEST_DIR) && SCOPE_MODE=full ./run_tests.sh
+
+.PHONY: test-all
+test-all: test-app test-full
+	@echo "All scope tests completed"
+
 .PHONY: test-auth
 test-auth:
 	@cd $(TEST_DIR) && ./run_tests.sh auth
+
+.PHONY: test-scope
+test-scope:
+	@cd $(TEST_DIR) && ./run_tests.sh scope
 
 .PHONY: test-file
 test-file:
@@ -110,7 +132,11 @@ clean:
 
 .PHONY: auth
 auth:
-	@./$(SCRIPT) init
+	@./$(SCRIPT) --app-only init
+
+.PHONY: auth-full
+auth-full:
+	@./$(SCRIPT) --full-access init
 
 # Statistics
 .PHONY: stats

@@ -24,6 +24,7 @@ SUMMARY_LOG="$LOG_DIR/test_summary_$(date +%Y%m%d_%H%M%S).log"
 # Test suite files
 TEST_SUITES=(
     "test_auth.sh"
+    "test_scope.sh"
     "test_file_ops.sh"
     "test_folder_ops.sh"
     "test_permissions.sh"
@@ -44,6 +45,10 @@ QUICK=${QUICK:-0}
 SUITE_FILTER="${1:-}"
 CLEANUP=${TEST_CLEANUP:-1}
 
+# Scope mode configuration
+SCOPE_MODE="${SCOPE_MODE:-app}"
+export TEST_SCOPE_MODE="$SCOPE_MODE"
+
 # Help message
 show_help() {
     cat << EOF
@@ -61,6 +66,7 @@ ${BOLD}OPTIONS:${NC}
 
 ${BOLD}TEST SUITES:${NC}
     auth                Authentication tests
+    scope               OAuth scope configuration tests
     file                File operations tests
     folder              Folder operations tests
     permissions         Permission management tests
@@ -70,15 +76,18 @@ ${BOLD}TEST SUITES:${NC}
     all                 Run all test suites (default)
 
 ${BOLD}ENVIRONMENT VARIABLES:${NC}
+    SCOPE_MODE=app|full Run tests with specific scope (default: app)
     TEST_CLEANUP=0      Keep test files for debugging
     VERBOSE=1           Enable verbose output
     QUICK=1             Skip slow tests
 
 ${BOLD}EXAMPLES:${NC}
-    $0                  # Run all tests
+    $0                  # Run all tests (app mode)
     $0 auth             # Run only authentication tests
     $0 -v file          # Run file tests with verbose output
     $0 -n permissions   # Run permission tests without cleanup
+    SCOPE_MODE=full $0  # Run all tests with full Drive access
+    SCOPE_MODE=app $0 scope  # Run scope tests in app mode
 
 EOF
 }
@@ -128,7 +137,8 @@ print_banner() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║                                                          ║${NC}"
     echo -e "${CYAN}║${NC}  ${BOLD}gdrive_curl.sh Test Suite${NC}                              ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  Testing ${BOLD}28 commands${NC} across ${BOLD}7 test suites${NC}              ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  Testing ${BOLD}29 commands${NC} across ${BOLD}8 test suites${NC}              ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  Scope Mode: ${BOLD}$TEST_SCOPE_MODE${NC} $([ "$TEST_SCOPE_MODE" = "full" ] && echo "(Full Drive Access)" || echo "(App-Only Access)")  ${CYAN}║${NC}"
     echo -e "${CYAN}║                                                          ║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
     echo
@@ -156,12 +166,20 @@ check_prerequisites() {
         fi
     done
 
-    # Check authentication
-    if "$GDRIVE_SCRIPT" list >/dev/null 2>&1; then
-        echo -e "${GREEN}✓ Authentication valid${NC}"
+    # Check authentication with correct scope
+    if [[ "$TEST_SCOPE_MODE" == "full" ]]; then
+        auth_check_cmd="$GDRIVE_SCRIPT --full-access list"
+        init_cmd="$GDRIVE_SCRIPT --full-access init"
     else
-        echo -e "${YELLOW}⚠ Not authenticated - some tests will be skipped${NC}"
-        echo -e "${YELLOW}  Run: $GDRIVE_SCRIPT init${NC}"
+        auth_check_cmd="$GDRIVE_SCRIPT --app-only list"
+        init_cmd="$GDRIVE_SCRIPT --app-only init"
+    fi
+
+    if $auth_check_cmd >/dev/null 2>&1; then
+        echo -e "${GREEN}✓ Authentication valid ($TEST_SCOPE_MODE mode)${NC}"
+    else
+        echo -e "${YELLOW}⚠ Not authenticated for $TEST_SCOPE_MODE mode - some tests will be skipped${NC}"
+        echo -e "${YELLOW}  Run: $init_cmd${NC}"
     fi
 
     # Create log directory
