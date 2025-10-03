@@ -1,0 +1,23 @@
+# Test artifacts
+tests/logs/
+tests/data/
+*.log
+*.tmp
+*.test
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Debug files
+*.debug
+debug.*
+
+# Backup files
+*.bak
+*~
