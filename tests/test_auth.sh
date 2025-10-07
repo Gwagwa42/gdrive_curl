@@ -8,8 +8,18 @@ source "$(dirname "$0")/test_helpers.sh"
 
 test_check_authentication() {
     # Test: Check if authenticated
-    if gdrive_silent list; then
+    local test_output
+    test_output=$(gdrive list 2>&1)
+    local exit_code=$?
+
+    if [[ $exit_code -eq 0 ]]; then
         pass "Authentication is valid"
+    elif echo "$test_output" | grep -q "has not been used in project"; then
+        fail "Google Drive API not enabled for project - visit the URL in the error message to enable it"
+    elif echo "$test_output" | grep -q "No tokens"; then
+        fail "Not authenticated - run: $GDRIVE_SCRIPT init"
+    elif echo "$test_output" | grep -q "Error during"; then
+        fail "API error - check credentials and scope permissions"
     else
         fail "Not authenticated or token expired"
     fi
@@ -60,8 +70,16 @@ test_token_has_required_fields() {
 
 test_list_command_works() {
     # Test: Basic list command works (proves auth is working)
-    if output=$(gdrive list 2>&1); then
+    local output
+    output=$(gdrive list 2>&1)
+    local exit_code=$?
+
+    if [[ $exit_code -eq 0 ]]; then
         pass "List command works with authentication"
+    elif echo "$output" | grep -q "has not been used in project"; then
+        fail "List command failed - Google Drive API not enabled (see error above)"
+    elif echo "$output" | grep -q "Error during"; then
+        fail "List command failed - API error occurred"
     else
         fail "List command failed - authentication may be invalid"
     fi
@@ -69,8 +87,16 @@ test_list_command_works() {
 
 test_quota_command_works() {
     # Test: Quota command works (requires valid auth)
-    if output=$(gdrive quota 2>&1); then
+    local output
+    output=$(gdrive quota 2>&1)
+    local exit_code=$?
+
+    if [[ $exit_code -eq 0 ]]; then
         assert_contains "$output" "Storage:" "Quota command returns storage info"
+    elif echo "$output" | grep -q "has not been used in project"; then
+        fail "Quota command failed - Google Drive API not enabled"
+    elif echo "$output" | grep -q "Error during"; then
+        fail "Quota command failed - API error occurred"
     else
         fail "Quota command failed"
     fi

@@ -66,8 +66,9 @@ test_share_file_commenter() {
 
 test_share_invalid_role() {
     # Test: Share with invalid role should fail
-    if ! gdrive share "$TEST_FILE_ID" "invalid_role" 2>&1 | grep -q "Invalid role"; then
-        fail "Should reject invalid role"
+    # Note: gdrive wrapper redirects stderr to log, so we need to check exit code only
+    if gdrive share "$TEST_FILE_ID" "invalid_role" >/dev/null 2>&1; then
+        fail "Should reject invalid role with non-zero exit code"
     else
         pass "Correctly rejects invalid role"
     fi
@@ -121,7 +122,7 @@ test_delete_permission() {
         gdrive share "$file_id" reader >/dev/null 2>&1
 
         # Get the permission ID
-        local perm_line=$(gdrive list-permissions "$file_id" 2>/dev/null | grep "anyone" | head -1)
+        local perm_line=$(gdrive list-permissions "$file_id" 2>/dev/null | grep "anyone" | head -n 1)
         local perm_id=$(echo "$perm_line" | awk '{print $1}')
 
         if assert_not_empty "$perm_id" "Found permission ID to delete"; then
@@ -153,7 +154,7 @@ test_update_permission() {
         gdrive share "$file_id" reader >/dev/null 2>&1
 
         # Get the permission ID
-        local perm_line=$(gdrive list-permissions "$file_id" 2>/dev/null | grep "anyone" | head -1)
+        local perm_line=$(gdrive list-permissions "$file_id" 2>/dev/null | grep "anyone" | head -n 1)
         local perm_id=$(echo "$perm_line" | awk '{print $1}')
 
         if assert_not_empty "$perm_id" "Found permission ID to update"; then
@@ -178,12 +179,13 @@ test_update_permission_invalid_role() {
     gdrive share "$TEST_FILE_ID" reader >/dev/null 2>&1
 
     # Get the permission ID
-    local perm_line=$(gdrive list-permissions "$TEST_FILE_ID" 2>/dev/null | grep "anyone" | head -1)
+    local perm_line=$(gdrive list-permissions "$TEST_FILE_ID" 2>/dev/null | grep "anyone" | head -n 1)
     local perm_id=$(echo "$perm_line" | awk '{print $1}')
 
     if [[ -n "$perm_id" ]]; then
-        if ! gdrive update-permission "$TEST_FILE_ID" "$perm_id" "invalid_role" 2>&1 | grep -q "Invalid role"; then
-            fail "Should reject invalid role in update"
+        # Note: gdrive wrapper redirects stderr to log, so we need to check exit code only
+        if gdrive update-permission "$TEST_FILE_ID" "$perm_id" "invalid_role" >/dev/null 2>&1; then
+            fail "Should reject invalid role in update with non-zero exit code"
         else
             pass "Correctly rejects invalid role in update"
         fi

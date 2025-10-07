@@ -167,6 +167,30 @@ ensure_access_token() {
     jq -r .access_token "$TOKENS_FILE"
 }
 
+check_api_error() {
+    local resp="$1"
+    local operation="${2:-API call}"
+
+    # Check if response contains an error field
+    if echo "$resp" | jq -e '.error' >/dev/null 2>&1; then
+        local error_msg=$(echo "$resp" | jq -r '.error.message // .error // "Unknown error"')
+        local error_code=$(echo "$resp" | jq -r '.error.code // ""')
+
+        echo "Error during $operation:" >&2
+        echo "  $error_msg" >&2
+
+        # Provide helpful guidance based on error type
+        if [[ "$error_msg" == *"unauthorized"* ]] || [[ "$error_msg" == *"Unauthorized"* ]]; then
+            echo "  Try re-authenticating: $0 init" >&2
+        elif [[ "$error_msg" == *"insufficient"* ]] || [[ "$error_code" == "403" ]]; then
+            echo "  Check permissions for this scope mode: $0 scope" >&2
+        fi
+
+        return 1
+    fi
+    return 0
+}
+
 mime_of() {
     file --mime-type -b "$1"
 }
@@ -250,6 +274,11 @@ list_folder_id_by_name() {
         --data-urlencode "q=$q" \
         --data-urlencode "fields=files(id,name)")
 
+    # Check for API errors before parsing
+    if ! check_api_error "$resp" "finding folder"; then
+        return 1
+    fi
+
     # Parse and display results in a clean format
     echo "$resp" | jq -r '.files[] | "\(.id)\t\(.name)"'
 }
@@ -309,6 +338,11 @@ list_files() {
                 --data-urlencode "pageSize=$page_size" \
                 --data-urlencode "fields=files(id,name,mimeType,size,modifiedTime),nextPageToken" \
                 --data-urlencode "orderBy=name")
+        fi
+
+        # Check for API errors before parsing
+        if ! check_api_error "$resp" "listing files"; then
+            return 1
         fi
 
         # Display results in clean format
@@ -556,6 +590,11 @@ search_files() {
         --data-urlencode "fields=files(id,name,mimeType,size,modifiedTime),nextPageToken" \
         --data-urlencode "orderBy=modifiedTime desc")
 
+    # Check for API errors before parsing
+    if ! check_api_error "$resp" "searching files"; then
+        return 1
+    fi
+
     # Display results in tab-separated format
     echo "$resp" | jq -r '.files[] | "\(.id)\t\(.name)\t\(.mimeType)\t\(.size // "N/A")\t\(.modifiedTime)"'
 }
@@ -622,6 +661,11 @@ list_trash() {
                 --data-urlencode "q=trashed=true" \
                 --data-urlencode "pageSize=$page_size" \
                 --data-urlencode "fields=files(id,name,mimeType,trashedTime),nextPageToken")
+        fi
+
+        # Check for API errors before parsing
+        if ! check_api_error "$resp" "listing trash"; then
+            return 1
         fi
 
         # Display trashed files in tab-separated format
@@ -761,6 +805,11 @@ get_starred() {
                 --data-urlencode "q=starred=true and trashed=false" \
                 --data-urlencode "pageSize=$page_size" \
                 --data-urlencode "fields=files(id,name,mimeType,modifiedTime),nextPageToken")
+        fi
+
+        # Check for API errors before parsing
+        if ! check_api_error "$resp" "listing starred files"; then
+            return 1
         fi
 
         # Display starred files in tab-separated format

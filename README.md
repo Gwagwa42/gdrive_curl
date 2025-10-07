@@ -141,6 +141,14 @@ This means you can have both authorizations active and switch between them.
    ./gdrive_curl.sh init
    ```
 
+   **Note for Testing**: These environment variables must be exported for the test suite to work:
+   ```bash
+   # Export credentials before running tests
+   export CLIENT_ID="your-client-id.apps.googleusercontent.com"
+   export CLIENT_SECRET="your-client-secret"
+   make test
+   ```
+
 ### First Time Authentication
 
 ```bash

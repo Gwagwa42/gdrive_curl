@@ -39,6 +39,17 @@ init_test_env() {
     mkdir -p "$TEST_LOG_DIR"
     touch "$TEST_LOG_FILE"
 
+    # Check for credentials config file or environment variables
+    local creds_file="$HOME/.config/gdrive-curl/credentials"
+    if [[ -f "$creds_file" ]]; then
+        # Source credentials from config file
+        source "$creds_file"
+    fi
+
+    # Export credentials if they exist (from config file or parent environment)
+    [[ -n "${CLIENT_ID:-}" ]] && export CLIENT_ID
+    [[ -n "${CLIENT_SECRET:-}" ]] && export CLIENT_SECRET
+
     echo "=== Test Environment ===" | tee -a "$TEST_LOG_FILE"
     echo "Script: $GDRIVE_SCRIPT" | tee -a "$TEST_LOG_FILE"
     echo "Test folder: $TEST_FOLDER_NAME" | tee -a "$TEST_LOG_FILE"
@@ -157,15 +168,41 @@ run_test() {
     echo -e "${BLUE}Running: $test_name${NC}"
     echo "=== Test: $test_name ===" >> "$TEST_LOG_FILE"
 
-    # Run test in subshell to isolate failures
-    if (
-        set -e
+    # Capture pass/fail counts before test
+    local passes_before=$TESTS_PASSED
+    local fails_before=$TESTS_FAILED
+    local skips_before=$TESTS_SKIPPED
+
+    # Run test and capture its output
+    local test_output
+    test_output=$(
+        # Export current counts to subshell
+        export TESTS_PASSED=$TESTS_PASSED
+        export TESTS_FAILED=$TESTS_FAILED
+        export TESTS_SKIPPED=$TESTS_SKIPPED
+
+        # Run test
         $test_function
-    ); then
-        echo ""
-    else
-        echo ""
+
+        # Echo counts for capture
+        echo "___COUNTS___:$TESTS_PASSED:$TESTS_FAILED:$TESTS_SKIPPED"
+    )
+
+    # Display test output (without the counts line)
+    echo "$test_output" | grep -v "^___COUNTS___:"
+
+    # Extract and update counts
+    if counts_line=$(echo "$test_output" | grep "^___COUNTS___:"); then
+        local new_passed=$(echo "$counts_line" | cut -d: -f2)
+        local new_failed=$(echo "$counts_line" | cut -d: -f3)
+        local new_skipped=$(echo "$counts_line" | cut -d: -f4)
+
+        TESTS_PASSED=$new_passed
+        TESTS_FAILED=$new_failed
+        TESTS_SKIPPED=$new_skipped
     fi
+
+    echo ""
 }
 
 skip_test() {
@@ -223,7 +260,7 @@ get_token_file() {
 get_test_folder_id() {
     # Get or create test folder
     local folder_id
-    folder_id=$(gdrive find-folder "$TEST_FOLDER_NAME" 2>/dev/null | head -1 | cut -f1)
+    folder_id=$(gdrive find-folder "$TEST_FOLDER_NAME" 2>/dev/null | head -n 1 | cut -f1)
 
     if [[ -z "$folder_id" ]]; then
         # Create test folder
@@ -271,7 +308,7 @@ cleanup_test_folder() {
     local folder_id="${1:-}"
 
     if [[ -z "$folder_id" ]]; then
-        folder_id=$(gdrive find-folder "$TEST_FOLDER_NAME" 2>/dev/null | head -1 | cut -f1)
+        folder_id=$(gdrive find-folder "$TEST_FOLDER_NAME" 2>/dev/null | head -n 1 | cut -f1)
     fi
 
     if [[ -n "$folder_id" ]]; then

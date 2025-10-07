@@ -92,6 +92,12 @@ ${BOLD}EXAMPLES:${NC}
 EOF
 }
 
+# Capitalize first letter (portable for older bash)
+capitalize() {
+    local str="$1"
+    echo "$(echo "${str:0:1}" | tr '[:lower:]' '[:upper:]')${str:1}"
+}
+
 # Parse arguments
 parse_args() {
     while [[ $# -gt 0 ]]; do
@@ -227,7 +233,7 @@ run_test_suite() {
     ((TOTAL_SUITES++))
 
     echo -e "${MAGENTA}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${MAGENTA}Running: ${BOLD}${suite_name^} Tests${NC}"
+    echo -e "${MAGENTA}Running: ${BOLD}$(capitalize "$suite_name") Tests${NC}"
     echo -e "${MAGENTA}═══════════════════════════════════════════════════════════${NC}"
 
     local suite_path="$SCRIPT_DIR/$suite_file"
@@ -245,23 +251,23 @@ run_test_suite() {
     # Run the test suite
     if [[ $VERBOSE -eq 1 ]]; then
         if bash "$suite_path" 2>&1 | tee "$suite_log"; then
-            echo -e "${GREEN}✓ ${suite_name^} tests passed${NC}"
+            echo -e "${GREEN}✓ $(capitalize "$suite_name") tests passed${NC}"
             ((PASSED_SUITES++))
         else
-            echo -e "${RED}✗ ${suite_name^} tests failed${NC}"
+            echo -e "${RED}✗ $(capitalize "$suite_name") tests failed${NC}"
             ((FAILED_SUITES++))
         fi
     else
         if bash "$suite_path" > "$suite_log" 2>&1; then
-            echo -e "${GREEN}✓ ${suite_name^} tests passed${NC}"
+            echo -e "${GREEN}✓ $(capitalize "$suite_name") tests passed${NC}"
             ((PASSED_SUITES++))
 
             # Show summary from log
             if grep -q "TEST SUMMARY" "$suite_log"; then
-                sed -n '/TEST SUMMARY/,/═══════/p' "$suite_log" | tail -n +2 | head -n -1
+                sed -n '/TEST SUMMARY/,/═══════/p' "$suite_log" | sed '1d;$d'
             fi
         else
-            echo -e "${RED}✗ ${suite_name^} tests failed${NC}"
+            echo -e "${RED}✗ $(capitalize "$suite_name") tests failed${NC}"
             ((FAILED_SUITES++))
 
             # Show failures from log

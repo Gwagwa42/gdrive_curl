@@ -96,7 +96,7 @@ test_revision_workflow_simulation() {
             fi
 
             # Try to get first revision ID
-            local first_rev_id=$(echo "$revisions" | head -1 | awk '{print $1}')
+            local first_rev_id=$(echo "$revisions" | head -n 1 | awk '{print $1}')
             if [[ -n "$first_rev_id" ]] && [[ "$first_rev_id" != "null" ]]; then
                 # Try to download the revision
                 local download_path="$TEST_DATA_DIR/old_version.txt"
@@ -141,7 +141,7 @@ test_get_revision_with_auto_filename() {
         local revisions=$(gdrive list-revisions "$file_id" 2>/dev/null || echo "")
 
         if [[ -n "$revisions" ]]; then
-            local rev_id=$(echo "$revisions" | head -1 | awk '{print $1}')
+            local rev_id=$(echo "$revisions" | head -n 1 | awk '{print $1}')
 
             if [[ -n "$rev_id" ]] && [[ "$rev_id" != "null" ]]; then
                 # Try to download without specifying output filename
@@ -184,7 +184,7 @@ test_revision_metadata() {
         if [[ -n "$revisions" ]]; then
             # Check for expected columns
             # Should have: revision_id, modifiedTime, lastModifyingUser
-            local first_line=$(echo "$revisions" | head -1)
+            local first_line=$(echo "$revisions" | head -n 1)
             local column_count=$(echo "$first_line" | awk '{print NF}')
 
             if [[ $column_count -ge 2 ]]; then
