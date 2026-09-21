@@ -561,7 +561,8 @@ mkdir_tree() {
             paths+=("$line")
         done < <(if [[ "$paths_file" == "-" ]]; then cat; else cat "$paths_file"; fi)
     fi
-    paths+=("${positional[@]}")
+    # ${arr[@]+"${arr[@]}"}: expanding an empty array is an unbound-variable error under set -u before bash 4.4
+    paths+=(${positional[@]+"${positional[@]}"})
 
     if [[ ${#paths[@]} -eq 0 ]]; then
         echo "No paths given (use --file or positional arguments)" >&2
@@ -587,7 +588,7 @@ mkdir_tree() {
         normalized=""
         local -a segments=()
         IFS='/' read -r -a segments <<< "$path"
-        for segment in "${segments[@]}"; do
+        for segment in ${segments[@]+"${segments[@]}"}; do
             [[ -z "$segment" ]] && continue
             normalized="${normalized:+$normalized/}$segment"
             local key="$current_id/$segment"
@@ -631,7 +632,7 @@ mkdir_tree() {
     done
 
     if (( json_out )); then
-        printf '%s\n' "${results[@]}" | jq -s '.'
+        printf '%s\n' ${results[@]+"${results[@]}"} | jq -s '.'
     fi
     if (( dry_run )); then
         log "Dry run complete: $created_count folder(s) would be created, $existing_count already exist"
