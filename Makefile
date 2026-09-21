@@ -2,9 +2,11 @@
 
 # Variables
 SCRIPT = gdrive_curl.sh
+WRAPPER = gdrive_mkdir.sh
 TEST_DIR = tests
 INSTALL_DIR = /usr/local/bin
 SCRIPT_NAME = gdrive-curl
+WRAPPER_NAME = gdrive-mkdir
 
 # Default target
 .PHONY: help
@@ -20,14 +22,16 @@ help:
 	@echo "  make test-scope    - Run scope configuration tests"
 	@echo "  make test-file     - Run file operations tests"
 	@echo "  make test-folder   - Run folder operations tests"
+	@echo "  make test-mkdir-tree - Run mkdir-tree tests (real API)"
+	@echo "  make test-offline  - Run mkdir-tree tests with a fake API (no credentials)"
 	@echo "  make test-perms    - Run permission tests"
 	@echo "  make test-star     - Run star/trash tests"
 	@echo "  make test-search   - Run search/export tests"
 	@echo "  make test-revisions - Run version history tests"
 	@echo "  make test-verbose  - Run all tests with verbose output"
 	@echo "  make test-quick    - Run quick tests only"
-	@echo "  make install       - Install script to $(INSTALL_DIR)"
-	@echo "  make uninstall     - Remove script from $(INSTALL_DIR)"
+	@echo "  make install       - Install scripts to $(INSTALL_DIR)"
+	@echo "  make uninstall     - Remove scripts from $(INSTALL_DIR)"
 	@echo "  make check         - Check syntax with shellcheck"
 	@echo "  make clean         - Clean test logs and data"
 	@echo "  make auth          - Authenticate with Google Drive (app mode)"
@@ -67,6 +71,14 @@ test-file:
 test-folder:
 	@cd $(TEST_DIR) && ./run_tests.sh folder
 
+.PHONY: test-mkdir-tree
+test-mkdir-tree:
+	@cd $(TEST_DIR) && ./run_tests.sh mkdir-tree
+
+.PHONY: test-offline
+test-offline:
+	@cd $(TEST_DIR) && ./test_mkdir_tree_offline.sh
+
 .PHONY: test-perms
 test-perms:
 	@cd $(TEST_DIR) && ./run_tests.sh permissions
@@ -101,23 +113,26 @@ install:
 	@echo "Installing $(SCRIPT) to $(INSTALL_DIR)/$(SCRIPT_NAME)"
 	@sudo cp $(SCRIPT) $(INSTALL_DIR)/$(SCRIPT_NAME)
 	@sudo chmod +x $(INSTALL_DIR)/$(SCRIPT_NAME)
-	@echo "Installation complete. You can now use: $(SCRIPT_NAME)"
+	@echo "Installing $(WRAPPER) to $(INSTALL_DIR)/$(WRAPPER_NAME)"
+	@sudo cp $(WRAPPER) $(INSTALL_DIR)/$(WRAPPER_NAME)
+	@sudo chmod +x $(INSTALL_DIR)/$(WRAPPER_NAME)
+	@echo "Installation complete. You can now use: $(SCRIPT_NAME) and $(WRAPPER_NAME)"
 
 .PHONY: uninstall
 uninstall:
-	@echo "Removing $(SCRIPT_NAME) from $(INSTALL_DIR)"
-	@sudo rm -f $(INSTALL_DIR)/$(SCRIPT_NAME)
+	@echo "Removing $(SCRIPT_NAME) and $(WRAPPER_NAME) from $(INSTALL_DIR)"
+	@sudo rm -f $(INSTALL_DIR)/$(SCRIPT_NAME) $(INSTALL_DIR)/$(WRAPPER_NAME)
 	@echo "Uninstall complete"
 
 # Development targets
 .PHONY: check
 check:
 	@echo "Checking shell script syntax..."
-	@bash -n $(SCRIPT)
+	@bash -n $(SCRIPT) $(WRAPPER)
 	@echo "✓ Syntax check passed"
 	@if command -v shellcheck >/dev/null 2>&1; then \
 		echo "Running shellcheck..."; \
-		shellcheck -e SC2086,SC2181 $(SCRIPT); \
+		shellcheck -e SC2086,SC2181 $(SCRIPT) $(WRAPPER); \
 		echo "✓ Shellcheck passed"; \
 	else \
 		echo "ℹ shellcheck not installed, skipping"; \

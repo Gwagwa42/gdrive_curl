@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Fake 'curl' emulating the subset of the Google Drive API used by mkdir-tree.
+# Put tests/stubs first in PATH to run mkdir-tree without network or credentials.
+#
+# State lives in $STUB_STATE_DIR:
+#   folders.tsv  one folder per line: <id>\t<parent_id>\t<name>
+#   fail_queue   optional; each request pops the first line and, if it is an
+#                HTTP status code, answers with that status and an error body
+#   requests.log every request as: <METHOD> <URL> [q=<query> | body=<json>]
+#
+# Supported requests:
+#   GET  .../drive/v3/files?q='<parent>' in parents and name='<name>' ...  -> {"files":[...]}
+#   POST .../drive/v3/files   body {name, mimeType, parents:[parent]}      -> {"id","name"}
+# Anything else answers 200 {} so unrelated calls do not break.
+
+STATE_DIR="${STUB_STATE_DIR:?STUB_STATE_DIR must be set}"
+FOLDERS="$STATE_DIR/folders.tsv"
+FAIL_QUEUE="$STATE_DIR/fail_queue"
+REQ_LOG="$STATE_DIR/requests.log"
+touch "$FOLDERS" "$REQ_LOG"
+
+method="GET"
+url=""
+out_file=""
+want_status=0
+query=""
+body=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -X) method="$2"; shift 2 ;;
+        -G) method="GET"; shift ;;
+        -o) out_file="$2"; shift 2 ;;
+        -w) want_status=1; shift 2 ;;
+        -H) shift 2 ;;
+        -d) body="$2"; shift 2 ;;
+        --data-urlencode)
+            [[ "$2" == q=* ]] && query="${2#q=}"
+            shift 2 ;;
+        -s|-S|-sS|-L) shift ;;
+        http*) url="$1"; shift ;;
+        *) shift ;;
+    esac
+done
+
+respond() {
+    # $1: status, $2: body
+    if [[ -n "$out_file" ]]; then
+        printf '%s' "$2" > "$out_file"
+    else
+        printf '%s' "$2"
+    fi
+    (( want_status )) && printf '%s' "$1"
+    exit 0
+}
+
+# Fault injection: pop the next queued status, if any
+if [[ -s "$FAIL_QUEUE" ]]; then
+    status=$(head -n1 "$FAIL_QUEUE")
+    tail -n +2 "$FAIL_QUEUE" > "$FAIL_QUEUE.tmp" && mv "$FAIL_QUEUE.tmp" "$FAIL_QUEUE"
+    if [[ "$status" =~ ^[0-9]{3}$ ]]; then
+        echo "$method $url -> injected $status" >> "$REQ_LOG"
+        respond "$status" "{\"error\":{\"code\":$status,\"message\":\"Injected failure $status\"}}"
+    fi
+fi
+
+unescape_query_value() {
+    # Reverse drive_query_escape: \' -> ' and \\ -> \
+    printf %s "$1" | sed -e "s/\\\\'/'/g" -e 's/\\\\\\\\/\\\\/g'
+}
+
+if [[ "$method" == "GET" && "$url" == */drive/v3/files && -n "$query" ]]; then
+    echo "GET $url q=$query" >> "$REQ_LOG"
+    # Query shape: '<parent>' in parents and name='<name>' and mimeType=...
+    parent=$(printf %s "$query" | sed -n "s/^'\(.*\)' in parents and name='.*/\1/p")
+    name=$(printf %s "$query" | sed -n "s/^'.*' in parents and name='\(.*\)' and mimeType=.*/\1/p")
+    name=$(unescape_query_value "$name")
+    files=$(awk -F'\t' -v p="$parent" -v n="$name" '$2 == p && $3 == n { print $1 "\t" $3 }' "$FOLDERS" \
+        | jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {id: .[0], name: .[1]})')
+    respond 200 "{\"files\":$files}"
+fi
+
+if [[ "$method" == "POST" && "$url" == */drive/v3/files* ]]; then
+    echo "POST $url body=$body" >> "$REQ_LOG"
+    name=$(printf %s "$body" | jq -r '.name')
+    parent=$(printf %s "$body" | jq -r '.parents[0] // "root"')
+    id="stub$(( $(wc -l < "$FOLDERS") + 1 ))"
+    printf '%s\t%s\t%s\n' "$id" "$parent" "$name" >> "$FOLDERS"
+    respond 200 "$(jq -cn --arg id "$id" --arg name "$name" '{id: $id, name: $name}')"
+fi
+
+echo "$method $url (unhandled)" >> "$REQ_LOG"
+respond 200 '{}'
