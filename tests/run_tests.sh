@@ -27,6 +27,8 @@ TEST_SUITES=(
     "test_scope.sh"
     "test_file_ops.sh"
     "test_folder_ops.sh"
+    "test_mkdir_tree_offline.sh"
+    "test_mkdir_tree.sh"
     "test_permissions.sh"
     "test_star_trash.sh"
     "test_search_export.sh"
@@ -69,6 +71,8 @@ ${BOLD}TEST SUITES:${NC}
     scope               OAuth scope configuration tests
     file                File operations tests
     folder              Folder operations tests
+    mkdir-tree-offline  mkdir-tree tests with a fake API (no credentials needed)
+    mkdir-tree          mkdir-tree tests against the real API
     permissions         Permission management tests
     star-trash          Star and trash management tests
     search-export       Search and export tests
@@ -143,7 +147,7 @@ print_banner() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║                                                          ║${NC}"
     echo -e "${CYAN}║${NC}  ${BOLD}gdrive_curl.sh Test Suite${NC}                              ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  Testing ${BOLD}29 commands${NC} across ${BOLD}8 test suites${NC}              ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  Testing ${BOLD}30 commands${NC} across ${BOLD}10 test suites${NC}             ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}  Scope Mode: ${BOLD}$TEST_SCOPE_MODE${NC} $([ "$TEST_SCOPE_MODE" = "full" ] && echo "(Full Drive Access)" || echo "(App-Only Access)")  ${CYAN}║${NC}"
     echo -e "${CYAN}║                                                          ║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
@@ -230,7 +234,7 @@ run_test_suite() {
     suite_name=${suite_name#test_}
     suite_name=${suite_name//_/ }
 
-    ((TOTAL_SUITES++))
+    TOTAL_SUITES=$((TOTAL_SUITES + 1))
 
     echo -e "${MAGENTA}═══════════════════════════════════════════════════════════${NC}"
     echo -e "${MAGENTA}Running: ${BOLD}$(capitalize "$suite_name") Tests${NC}"
@@ -241,7 +245,7 @@ run_test_suite() {
 
     if [[ ! -f "$suite_path" ]]; then
         echo -e "${RED}✗ Test suite not found: $suite_path${NC}"
-        ((FAILED_SUITES++))
+        FAILED_SUITES=$((FAILED_SUITES + 1))
         return 1
     fi
 
@@ -252,15 +256,15 @@ run_test_suite() {
     if [[ $VERBOSE -eq 1 ]]; then
         if bash "$suite_path" 2>&1 | tee "$suite_log"; then
             echo -e "${GREEN}✓ $(capitalize "$suite_name") tests passed${NC}"
-            ((PASSED_SUITES++))
+            PASSED_SUITES=$((PASSED_SUITES + 1))
         else
             echo -e "${RED}✗ $(capitalize "$suite_name") tests failed${NC}"
-            ((FAILED_SUITES++))
+            FAILED_SUITES=$((FAILED_SUITES + 1))
         fi
     else
         if bash "$suite_path" > "$suite_log" 2>&1; then
             echo -e "${GREEN}✓ $(capitalize "$suite_name") tests passed${NC}"
-            ((PASSED_SUITES++))
+            PASSED_SUITES=$((PASSED_SUITES + 1))
 
             # Show summary from log
             if grep -q "TEST SUMMARY" "$suite_log"; then
@@ -268,7 +272,7 @@ run_test_suite() {
             fi
         else
             echo -e "${RED}✗ $(capitalize "$suite_name") tests failed${NC}"
-            ((FAILED_SUITES++))
+            FAILED_SUITES=$((FAILED_SUITES + 1))
 
             # Show failures from log
             echo -e "${YELLOW}Failed tests:${NC}"

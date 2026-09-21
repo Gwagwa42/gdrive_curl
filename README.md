@@ -8,6 +8,7 @@ A lightweight, standalone bash script for Google Drive file management using OAu
 - ✅ **File Upload/Download** - Multipart & resumable uploads, smart downloads with filename detection
 - ✅ **File Management** - List, rename, move, copy, update, delete, trash, and restore files
 - ✅ **Folder Operations** - Create folders, find by name, navigate hierarchy
+- ✅ **Folder Trees** - `mkdir-tree` creates whole hierarchies idempotently (`mkdir -p` for Drive)
 - ✅ **Sharing & Permissions** - Create shareable links, manage access permissions
 - ✅ **Advanced Search** - Full Google Drive API query syntax support
 - ✅ **Google Workspace Export** - Export Docs/Sheets/Slides to standard formats
@@ -48,6 +49,9 @@ sudo apt-get install curl jq file
 # Fedora/RHEL
 sudo dnf install curl jq file
 ```
+
+`mkdir-tree` uses associative arrays and therefore needs bash 4 or newer
+(on macOS: `brew install bash`, the `#!/usr/bin/env bash` shebang picks it up).
 
 ### Download
 
@@ -213,6 +217,7 @@ This means you can have both authorizations active and switch between them.
 |---------|------------|
 | `create-folder <name> [parent_id]` | Create new folder |
 | `find-folder <name>` | Find folder by name |
+| `mkdir-tree [options] [path ...]` | Create nested folders like `mkdir -p` (see [Folder Trees](#folder-trees)) |
 | `list [parent_id] [page_size]` | List files in folder |
 
 ### Sharing & Permissions
@@ -344,6 +349,65 @@ project_id=$(./gdrive_curl.sh create-folder "My Project" | jq -r '.id')
 ./gdrive_curl.sh move file123 "$project_id"
 ```
 
+### Folder Trees
+
+`mkdir-tree` creates a whole hierarchy in one command. Each path segment is
+looked up under its parent first: existing folders are reused (their ID is
+reported), missing ones are created. Re-running the same command is therefore
+safe and only fills in what is missing.
+
+```bash
+# Paths as arguments, relative to a parent folder (default: Drive root)
+./gdrive_curl.sh mkdir-tree --parent-id="$project_id" "Clients/ACME/Invoices/2026" "Clients/ACME/Contracts"
+
+# Paths from a file (one per line; blank lines and '#' comments are ignored)
+cat > structure.txt <<'EOF'
+# Per-client layout
+ACME
+ACME/1 - Contracts
+ACME/2 - Invoices
+ACME/2 - Invoices/2026
+EOF
+./gdrive_curl.sh mkdir-tree -f structure.txt --parent-id="$project_id" -v
+# Created: ACME [ID: 1aBc...]
+# Created: ACME/1 - Contracts [ID: 1dEf...]
+# ...
+# Done! 4 folder(s) created, 0 already existed
+
+# Machine-readable result
+./gdrive_curl.sh mkdir-tree --parent-id="$project_id" --json "ACME/2 - Invoices/2027"
+# [{"path":"ACME","id":"1aBc...","parent_id":"<project_id>","created":false}, ...]
+
+# Preview without creating anything
+./gdrive_curl.sh mkdir-tree -f structure.txt --parent-id="$project_id" --dry-run -v
+```
+
+| Option | Description |
+|--------|-------------|
+| `-f, --file <file>` | Read paths from a file (`-` for stdin) |
+| `-p, --parent-id <id>` | Root folder for every path (default: Drive root) |
+| `-v, --verbose` | `Created\|Exists: <path> [ID: <id>]` per folder, then a `Done!` summary |
+| `-n, --dry-run` | Resolve existing folders, create nothing |
+| `--json` | JSON array `[{path, id, parent_id, created}]` on stdout (verbose output goes to stderr) |
+
+Without `-v` or `--json`, one `<id>\t<path>` line is printed per folder.
+Processing stops at the first API error with exit code 1; folders already
+created are kept, so the command can simply be re-run. Transient errors
+(HTTP 429 and 5xx) are retried with exponential backoff (`GDRIVE_RETRIES`,
+default 3; `GDRIVE_RETRY_DELAY`, default 1s). Shared drives are supported.
+
+#### gdrive_mkdir.sh
+
+`gdrive_mkdir.sh` is a thin wrapper kept for callers that predate
+`mkdir-tree`. It accepts the same options and forwards them:
+
+```bash
+CLIENT_ID=... CLIENT_SECRET=... ./gdrive_mkdir.sh -f paths.txt --parent-id="$folder_id" -v
+```
+
+It locates `gdrive_curl.sh` through `$GDRIVE_CURL`, then next to itself, then
+as `gdrive-curl` on the `PATH` (installed by `make install` as `gdrive-mkdir`).
+
 ## Advanced Usage
 
 ### Environment Variables
@@ -364,6 +428,10 @@ export TOKENS_FILE="$HOME/.gdrive/tokens.json"
 
 # Enable debug output for troubleshooting
 export DEBUG=1
+
+# mkdir-tree retry policy for HTTP 429/5xx (default: 3 retries, 1s initial backoff)
+export GDRIVE_RETRIES=5
+export GDRIVE_RETRY_DELAY=2
 ```
 
 **Token File Locations by Mode**:
@@ -587,6 +655,14 @@ Run specific tests:
 ./test_auth.sh
 ./test_file_ops.sh
 ./test_permissions.sh
+./test_mkdir_tree.sh
+```
+
+The `mkdir-tree` command also has a suite that needs neither network nor
+credentials: `tests/stubs/curl` emulates the Drive API on disk, so it can run
+anywhere (`make test-offline`):
+```bash
+./test_mkdir_tree_offline.sh
 ```
 
 ## Contributing

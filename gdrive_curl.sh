@@ -101,10 +101,9 @@ obtain_device_code() {
 }
 
 poll_for_tokens() {
-    local device_code interval started resp err
+    local device_code interval resp err
     device_code="$1"
     interval="$2"
-    started=$(date +%s)
 
     while :; do
         resp=$(curl -sS -X POST \
@@ -173,8 +172,9 @@ check_api_error() {
 
     # Check if response contains an error field
     if echo "$resp" | jq -e '.error' >/dev/null 2>&1; then
-        local error_msg=$(echo "$resp" | jq -r '.error.message // .error // "Unknown error"')
-        local error_code=$(echo "$resp" | jq -r '.error.code // ""')
+        local error_msg error_code
+        error_msg=$(echo "$resp" | jq -r '.error.message // .error // "Unknown error"')
+        error_code=$(echo "$resp" | jq -r '.error.code // ""')
 
         echo "Error during $operation:" >&2
         echo "  $error_msg" >&2
@@ -210,7 +210,7 @@ upload_multipart() {
     local name="${1:-$(basename "$file")}"; shift || true
     local parent_id="${1:-}"; shift || true
 
-    local access token mime
+    local token mime
     token=$(ensure_access_token)
     mime=$(mime_of "$file")
 
@@ -409,6 +409,235 @@ create_folder() {
         -H "Content-Type: application/json" \
         -d "$metadata" \
         "$API_FILES?supportsAllDrives=true"
+}
+
+# --- mkdir-tree: create nested folder hierarchies (mkdir -p semantics) ---
+
+# Retry policy for transient API errors (429 and 5xx)
+MKDIR_TREE_RETRIES="${GDRIVE_RETRIES:-3}"
+MKDIR_TREE_RETRY_DELAY="${GDRIVE_RETRY_DELAY:-1}"
+
+api_call_retry() {
+    # Run a curl request, retrying on 429/5xx or transport failure with exponential backoff.
+    # Usage: api_call_retry <curl args...>   (do not pass -w / -o / -s flags)
+    # Prints the response body; returns 1 if every attempt failed on a retryable error.
+    local attempt=0 delay="$MKDIR_TREE_RETRY_DELAY" status body tmp
+    tmp=$(mktemp)
+    while :; do
+        status=$(curl -sS -o "$tmp" -w '%{http_code}' "$@" 2>/dev/null) || status="000"
+        body=$(cat "$tmp")
+        case "$status" in
+            429|500|502|503|504|000)
+                if (( attempt >= MKDIR_TREE_RETRIES )); then
+                    rm -f "$tmp"
+                    [[ -n "$body" ]] && echo "$body"
+                    echo "Giving up after $((attempt + 1)) attempts (last HTTP status: $status)" >&2
+                    return 1
+                fi
+                echo "Transient error (HTTP $status), retrying in ${delay}s..." >&2
+                sleep "$delay"
+                delay=$((delay * 2))
+                attempt=$((attempt + 1))
+                ;;
+            *)
+                rm -f "$tmp"
+                echo "$body"
+                return 0
+                ;;
+        esac
+    done
+}
+
+drive_query_escape() {
+    # Escape a literal string for use inside single quotes in a Drive API query
+    printf %s "$1" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g"
+}
+
+find_child_folder_id() {
+    # Return the ID of the folder named $2 directly under parent $1 (empty if none).
+    # Oldest match wins when duplicates exist; a warning is emitted for duplicates.
+    local parent_id="$1" name="$2" token resp q count
+    token=$(ensure_access_token)
+    q="'$(drive_query_escape "$parent_id")' in parents and name='$(drive_query_escape "$name")'"
+    q+=" and mimeType='application/vnd.google-apps.folder' and trashed=false"
+
+    resp=$(api_call_retry -G "$API_FILES" \
+        -H "Authorization: Bearer $token" \
+        --data-urlencode "q=$q" \
+        --data-urlencode "fields=files(id,name)" \
+        --data-urlencode "orderBy=createdTime" \
+        --data-urlencode "pageSize=10" \
+        --data-urlencode "supportsAllDrives=true" \
+        --data-urlencode "includeItemsFromAllDrives=true" \
+        --data-urlencode "corpora=allDrives") || return 1
+    check_api_error "$resp" "looking up folder '$name'" || return 1
+
+    count=$(echo "$resp" | jq -r '.files | length')
+    if (( count > 1 )); then
+        echo "Warning: $count folders named '$name' under $parent_id; using the oldest one" >&2
+    fi
+    echo "$resp" | jq -r '.files[0].id // empty'
+}
+
+create_child_folder() {
+    # Create folder $2 under parent $1 and print its ID
+    local parent_id="$1" name="$2" token metadata resp
+    token=$(ensure_access_token)
+    metadata=$(jq -cn --arg name "$name" --arg parent "$parent_id" \
+        '{name: $name, mimeType: "application/vnd.google-apps.folder", parents: [$parent]}')
+
+    resp=$(api_call_retry -X POST "$API_FILES?supportsAllDrives=true&fields=id,name" \
+        -H "Authorization: Bearer $token" \
+        -H "Content-Type: application/json" \
+        -d "$metadata") || return 1
+    check_api_error "$resp" "creating folder '$name'" || return 1
+    echo "$resp" | jq -r '.id'
+}
+
+mkdir_tree_usage() {
+    cat <<USAGE
+Usage: $0 mkdir-tree [options] [path ...]
+
+Create nested folder hierarchies, like 'mkdir -p'. Every segment of a path is
+reused if a folder with that name already exists under its parent, and created
+otherwise. Processing stops at the first API error (exit code 1).
+
+Options:
+  -f, --file <file>        Read paths from file (one per line, '#' comments and
+                           blank lines ignored; '-' for stdin)
+  -p, --parent-id <id>     Root folder for all paths (default: Drive root)
+  -v, --verbose            Human-readable progress: 'Created|Exists: <path> [ID: <id>]'
+                           followed by a 'Done!' summary line
+  -n, --dry-run            Resolve existing folders but create nothing
+      --json               Print a JSON array [{path,id,parent_id,created}] on stdout
+                           (verbose output then goes to stderr)
+  -h, --help               Show this help
+
+Without -v or --json, one line per path is printed: '<id>\t<path>'.
+Paths may also be given as arguments in addition to (or instead of) --file.
+
+Environment:
+  GDRIVE_RETRIES       Retries on HTTP 429/5xx (default: 3)
+  GDRIVE_RETRY_DELAY   Initial backoff in seconds, doubled each retry (default: 1)
+
+Examples:
+  $0 mkdir-tree --parent-id=abc123 "Client X/Invoices/2026"
+  $0 mkdir-tree -f paths.txt --parent-id=abc123 -v
+  printf 'a/b\na/c\n' | $0 mkdir-tree -f - --json
+USAGE
+}
+
+mkdir_tree() {
+    local paths_file="" parent_id="root" verbose=0 dry_run=0 json_out=0
+    local -a paths=() positional=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--file) [[ $# -ge 2 ]] || { mkdir_tree_usage >&2; return 1; }; paths_file="$2"; shift 2 ;;
+            --file=*) paths_file="${1#*=}"; shift ;;
+            -p|--parent-id) [[ $# -ge 2 ]] || { mkdir_tree_usage >&2; return 1; }; parent_id="$2"; shift 2 ;;
+            --parent-id=*) parent_id="${1#*=}"; shift ;;
+            -v|--verbose) verbose=1; shift ;;
+            -n|--dry-run) dry_run=1; shift ;;
+            --json) json_out=1; shift ;;
+            -h|--help) mkdir_tree_usage; return 0 ;;
+            --) shift; positional+=("$@"); break ;;
+            -*) echo "Unknown option for mkdir-tree: $1" >&2; mkdir_tree_usage >&2; return 1 ;;
+            *) positional+=("$1"); shift ;;
+        esac
+    done
+
+    if [[ -n "$paths_file" ]]; then
+        local line
+        if [[ "$paths_file" != "-" && ! -r "$paths_file" ]]; then
+            echo "Cannot read paths file: $paths_file" >&2
+            return 1
+        fi
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line%$'\r'}"
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            paths+=("$line")
+        done < <(if [[ "$paths_file" == "-" ]]; then cat; else cat "$paths_file"; fi)
+    fi
+    paths+=("${positional[@]}")
+
+    if [[ ${#paths[@]} -eq 0 ]]; then
+        echo "No paths given (use --file or positional arguments)" >&2
+        mkdir_tree_usage >&2
+        return 1
+    fi
+    [[ -n "$parent_id" ]] || parent_id="root"
+
+    # Verbose messages go to stderr when JSON is requested so stdout stays machine-readable
+    local log_fd=1
+    (( json_out )) && log_fd=2
+    log() { (( verbose )) && echo "$*" >&$log_fd; return 0; }
+
+    # Cache: "<parent_id>/<name>" -> folder id. In dry-run, folders that would be
+    # created get the placeholder "new:<path>" (Drive IDs never contain ':').
+    local -A cache=()
+    local -a results=()
+    local created_count=0 existing_count=0
+
+    local path segment current_id normalized
+    for path in "${paths[@]}"; do
+        current_id="$parent_id"
+        normalized=""
+        local -a segments=()
+        IFS='/' read -r -a segments <<< "$path"
+        for segment in "${segments[@]}"; do
+            [[ -z "$segment" ]] && continue
+            normalized="${normalized:+$normalized/}$segment"
+            local key="$current_id/$segment"
+            local created=false id=""
+
+            if [[ -n "${cache[$key]+set}" ]]; then
+                current_id="${cache[$key]}"
+                continue
+            fi
+
+            # Under a parent that does not exist yet (dry-run), nothing can exist
+            if [[ "$current_id" != new:* ]]; then
+                id=$(find_child_folder_id "$current_id" "$segment") || return 1
+            fi
+
+            if [[ -z "$id" ]]; then
+                if (( dry_run )); then
+                    log "Would create: $normalized"
+                    id="new:$normalized"
+                else
+                    id=$(create_child_folder "$current_id" "$segment") || return 1
+                    log "Created: $normalized [ID: $id]"
+                fi
+                created=true
+                created_count=$((created_count + 1))
+            else
+                log "Exists: $normalized [ID: $id]"
+                existing_count=$((existing_count + 1))
+            fi
+
+            cache["$key"]="$id"
+            if (( json_out )); then
+                results+=("$(jq -cn --arg path "$normalized" --arg id "$id" --arg parent "$current_id" --argjson created "$created" \
+                    'def real: if startswith("new:") then null else . end;
+                     {path: $path, id: ($id | real), parent_id: ($parent | real), created: $created}')")
+            elif (( ! verbose )); then
+                printf '%s\t%s\n' "${id/#new:*/-}" "$normalized"
+            fi
+            current_id="$id"
+        done
+    done
+
+    if (( json_out )); then
+        printf '%s\n' "${results[@]}" | jq -s '.'
+    fi
+    if (( dry_run )); then
+        log "Dry run complete: $created_count folder(s) would be created, $existing_count already exist"
+    else
+        log "Done! $created_count folder(s) created, $existing_count already existed"
+    fi
 }
 
 rename_file() {
@@ -961,6 +1190,7 @@ FILE MANAGEMENT:
 FOLDER OPERATIONS:
   create-folder <name> [parent_id]  Create new folder
   find-folder "<name>"              Find folder IDs by name
+  mkdir-tree [opts] [path ...]      Create nested folders (mkdir -p), see: mkdir-tree --help
 
 SHARING & COLLABORATION:
   share <file_id> [role]            Create shareable link (role: reader/writer/commenter, default: reader)
@@ -1005,6 +1235,7 @@ EXAMPLES:
   $0 download abc123 photo.jpg      # Download file
   $0 create-folder "My Folder"      # Create folder
   $0 find-folder "My Folder"        # Get folder ID
+  $0 mkdir-tree -p folder_id "Client/Invoices/2026"  # Create nested folders
   $0 upload doc.pdf "" folder_id    # Upload to specific folder
   $0 share abc123 reader            # Create shareable view link
   $0 search "name contains 'tax' and mimeType='application/pdf'"  # Find PDFs with "tax" in name
@@ -1048,6 +1279,13 @@ main() {
         -h|--help|help|scope|"")
             # Don't validate credentials for help, scope info, or empty command
             ;;
+        mkdir-tree)
+            # Sub-command help must work without credentials too
+            case " $* " in
+                *" -h "*|*" --help "*) ;;
+                *) validate_credentials ;;
+            esac
+            ;;
         *)
             # Validate credentials for all commands that interact with Google Drive
             validate_credentials
@@ -1083,6 +1321,7 @@ main() {
         # Folder Operations
         create-folder) [[ $# -ge 1 ]] || { usage; exit 1; }; create_folder "$@" ;;
         find-folder) [[ $# -ge 1 ]] || { usage; exit 1; }; list_folder_id_by_name "$1" ;;
+        mkdir-tree) mkdir_tree "$@" ;;
 
         # Sharing & Collaboration
         share) [[ $# -ge 1 ]] || { usage; exit 1; }; share_file "$@" ;;
