@@ -164,7 +164,7 @@ run_test() {
     local test_name="$1"
     local test_function="$2"
 
-    ((TESTS_RUN++))
+    TESTS_RUN=$((TESTS_RUN + 1))
     echo -e "${BLUE}Running: $test_name${NC}"
     echo "=== Test: $test_name ===" >> "$TEST_LOG_FILE"
 
@@ -209,7 +209,7 @@ skip_test() {
     local test_name="$1"
     local reason="${2:-}"
 
-    ((TESTS_SKIPPED++))
+    TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
     echo -e "${YELLOW}⊘ SKIP: $test_name${NC}"
     [[ -n "$reason" ]] && echo "  Reason: $reason"
     echo "SKIPPED: $test_name - $reason" >> "$TEST_LOG_FILE"
@@ -217,14 +217,14 @@ skip_test() {
 
 pass() {
     local message="$1"
-    ((TESTS_PASSED++))
+    TESTS_PASSED=$((TESTS_PASSED + 1))
     echo -e "  ${GREEN}✓ PASS${NC}: $message"
     echo "  PASS: $message" >> "$TEST_LOG_FILE"
 }
 
 fail() {
     local message="$1"
-    ((TESTS_FAILED++))
+    TESTS_FAILED=$((TESTS_FAILED + 1))
     echo -e "  ${RED}✗ FAIL${NC}: $message"
     echo "  FAIL: $message" >> "$TEST_LOG_FILE"
 }
@@ -308,7 +308,7 @@ cleanup_test_folder() {
     local folder_id="${1:-}"
 
     if [[ -z "$folder_id" ]]; then
-        folder_id=$(gdrive find-folder "$TEST_FOLDER_NAME" 2>/dev/null | head -n 1 | cut -f1)
+        folder_id=$(gdrive find-folder "$TEST_FOLDER_NAME" 2>/dev/null | head -n 1 | cut -f1 || true)
     fi
 
     if [[ -n "$folder_id" ]]; then
